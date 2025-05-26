@@ -3,60 +3,88 @@ import csv
 import yaml
 import os
 import sys
+from collections import Counter
 
+DEFAULT_POLICY = {
+    "min_length": 12,
+    "require_uppercase": True,
+    "require_lowercase": True,
+    "require_number": True,
+    "require_symbol": True
+}
 
 def load_policy(policy_file):
-    with open(policy_file, 'r') as f:
+    if not os.path.exists(policy_file):
+        print(f"[!] Policy file not found: {policy_file}. Using default policy.")
+        return DEFAULT_POLICY
+    with open(policy_file, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
-
 
 def validate_password(password, policy):
     reasons = []
-    
-    if len(password) < policy.get("min_length", 8):
+    score = 0
+
+    if len(password) >= policy.get("min_length", 12):
+        score += 1
+    else:
         reasons.append("Too short")
 
-    if policy.get("require_uppercase", True) and not re.search(r'[A-Z]', password):
-        reasons.append("Missing uppercase letter")
+    if policy.get("require_uppercase", True):
+        if re.search(r'[A-Z]', password): score += 1
+        else: reasons.append("Missing uppercase letter")
 
-    if policy.get("require_lowercase", True) and not re.search(r'[a-z]', password):
-        reasons.append("Missing lowercase letter")
+    if policy.get("require_lowercase", True):
+        if re.search(r'[a-z]', password): score += 1
+        else: reasons.append("Missing lowercase letter")
 
-    if policy.get("require_number", True) and not re.search(r'\d', password):
-        reasons.append("Missing number")
+    if policy.get("require_number", True):
+        if re.search(r'\d', password): score += 1
+        else: reasons.append("Missing number")
 
-    if policy.get("require_symbol", True) and not re.search(r'[!@#$%^&*(),.?\":{}|<>]', password):
-        reasons.append("Missing symbol")
+    if policy.get("require_symbol", True):
+        if re.search(r'[!@#$%^&*(),.?\":{}|<>]', password): score += 1
+        else: reasons.append("Missing symbol")
 
-    return (len(reasons) == 0), ", ".join(reasons)
-
+    strength = "Weak" if score <= 2 else "Medium" if score == 3 else "Strong"
+    return (len(reasons) == 0), ", ".join(reasons) if reasons else "Compliant", strength
 
 def analyze_passwords(password_file, policy_file, output_file):
-    print(f"[~] Loading policy from {policy_file}")
+    print(f"[~] Using policy: {policy_file}")
     policy = load_policy(policy_file)
 
     with open(password_file, 'r', encoding='utf-8') as f:
         passwords = [line.strip() for line in f if line.strip()]
 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+    results = []
+    summary = Counter()
+
     with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=["Password", "Valid", "Reason"])
+        writer = csv.DictWriter(csvfile, fieldnames=["#", "Password", "Valid", "Strength", "Reason"])
         writer.writeheader()
 
-        for pwd in passwords:
-            valid, reason = validate_password(pwd, policy)
+        for i, pwd in enumerate(passwords, 1):
+            valid, reason, strength = validate_password(pwd, policy)
+            results.append((pwd, valid, strength))
+            summary[strength] += 1
             writer.writerow({
+                "#": i,
                 "Password": pwd,
                 "Valid": "✅" if valid else "❌",
-                "Reason": "Compliant" if valid else reason
+                "Strength": strength,
+                "Reason": reason
             })
 
-    print(f"[+] Password audit complete. Results saved to {output_file}")
+    print(f"\n[+] Password audit complete. Summary:")
+    for k in ["Strong", "Medium", "Weak"]:
+        print(f"  - {k}: {summary.get(k, 0)}")
 
+    print(f"\n[✔] Results saved to: {output_file}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        print("Usage: python password_checker.py <password_file.txt> <policy.yaml> <output.csv>")
+        print("Usage:\n  python password_checker.py <passwords.txt> <policy.yaml> <output.csv>")
         sys.exit(1)
 
     analyze_passwords(sys.argv[1], sys.argv[2], sys.argv[3])
