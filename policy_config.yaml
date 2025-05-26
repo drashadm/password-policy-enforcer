@@ -1,0 +1,5 @@
+min_length: 12
+require_uppercase: true
+require_lowercase: true
+require_number: true
+require_symbol: true
